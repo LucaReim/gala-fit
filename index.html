@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GaLa Lineshape Fitting</title>
+  <meta name="description" content="Fit photoluminescence spectra of semiconductor nanocrystals with the GaLa lineshape, directly in your browser.">
+  <link rel="icon" href="assets/logo.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Pinned third-party libraries (versions also listed in js/config.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" defer></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-grid">
+      <div class="brand">
+        <img src="assets/logo.png" alt="GaLa logo" class="logo">
+        <div>
+          <h1>GaLa Lineshape Fitting</h1>
+          <p class="tagline">Fit photoluminescence spectra of semiconductor nanocrystals with the
+            Gaussian–asymmetric Laplace lineshape. Drop in a file, get a fit in seconds.</p>
+          <p class="privacy">🔒 Your data stays in your browser. Nothing is uploaded.</p>
+        </div>
+      </div>
+      <aside class="cite-box" aria-label="How to cite">
+        <h2>How to cite</h2>
+        <p class="cite-text">L. Luber, L. Reim, D. Benedikt, A. Singldinger, A. S. Urban,
+          <em>Photoluminescence as a Quantitative Probe of Semiconductor Nanocrystals</em>,
+          Nano Lett. 2026.
+          <a href="https://doi.org/10.1021/acs.nanolett.6c04076" target="_blank" rel="noopener">doi:10.1021/acs.nanolett.6c04076</a></p>
+        <div class="btn-row">
+          <button type="button" class="btn small" data-copy="citation">Copy citation</button>
+          <button type="button" class="btn small" data-copy="bibtex">Copy BibTeX</button>
+          <span class="copy-feedback" role="status" aria-live="polite"></span>
+        </div>
+      </aside>
+      <button type="button" id="theme-toggle" class="icon-btn" aria-label="Toggle dark mode" title="Toggle light/dark mode">☾</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="engine-status" class="engine-status loading" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="engine-text">Loading fitting engine…</span>
+    </div>
+
+    <!-- 1. Input -->
+    <section class="card" id="input-card">
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
+           aria-label="Drop spectrum files here or click to choose files">
+        <p class="drop-main"><strong>Drop spectrum files here</strong> or <span class="link-like">choose files</span></p>
+        <p class="drop-sub">.txt, .csv, .dat, .tsv · two columns (wavelength in nm or energy in eV, intensity) · several files at once are fine</p>
+        <input type="file" id="file-input" multiple accept=".txt,.csv,.dat,.tsv,text/plain,text/csv" hidden>
+      </div>
+      <div class="input-row">
+        <button type="button" id="example-btn" class="btn">Try example data</button>
+        <fieldset class="model-select">
+          <legend>Model</legend>
+          <label><input type="radio" name="model" value="GaLa" checked> GaLa <span class="muted">(recommended)</span></label>
+          <label><input type="radio" name="model" value="GaLx"> GaLx</label>
+        </fieldset>
+        <button type="button" id="clear-btn" class="btn ghost" hidden>Remove all spectra</button>
+      </div>
+      <p class="galx-info" id="galx-info">Use GaLx when the low-energy tail is not Laplacian, e.g. for 2 ML nanoplatelets,
+        where a Lorentzian low-energy tail describes the data better
+        (see <a href="https://doi.org/10.1021/acs.nanolett.6c04076" target="_blank" rel="noopener">Luber et al., Nano Lett. 2026</a>).</p>
+      <div id="file-errors" class="messages"></div>
+    </section>
+
+    <!-- Advanced settings -->
+    <details class="card collapsible" id="advanced">
+      <summary>Advanced settings</summary>
+      <div class="advanced-body">
+        <p class="muted">These settings apply to all loaded spectra. Press <strong>Fit again</strong> to apply them.</p>
+        <table class="param-table" id="param-table">
+          <thead><tr><th>Parameter</th><th>Start value</th><th>Lower bound</th><th>Upper bound</th><th>Fix</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <label class="check"><input type="checkbox" id="auto-x0" checked> Start E<sub>G</sub> at the energy of the spectral maximum</label>
+        <div class="settings-grid">
+          <fieldset>
+            <legend>Fit range (energy, eV)</legend>
+            <label>Min <input type="number" id="range-min" step="0.001" placeholder="full"></label>
+            <label>Max <input type="number" id="range-max" step="0.001" placeholder="full"></label>
+            <button type="button" class="btn small ghost" id="range-pick">Select on plot</button>
+            <button type="button" class="btn small ghost" id="range-clear">Full range</button>
+          </fieldset>
+          <fieldset>
+            <legend>x-axis unit</legend>
+            <label><input type="radio" name="unit" value="auto" checked> Auto-detect</label>
+            <label><input type="radio" name="unit" value="nm"> Wavelength (nm)</label>
+            <label><input type="radio" name="unit" value="eV"> Energy (eV)</label>
+          </fieldset>
+          <fieldset>
+            <legend>Preprocessing</legend>
+            <label class="check"><input type="checkbox" id="jacobian" checked> Apply Jacobian (nm → eV)</label>
+            <label class="check"><input type="checkbox" id="normalize" checked> Normalize to maximum</label>
+            <p class="muted small" id="normalize-hint" hidden>Without normalization, adjust the bounds of A and y to your intensity scale.</p>
+          </fieldset>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn primary" id="refit-btn">Fit again</button>
+          <button type="button" class="btn ghost" id="reset-btn">Reset to defaults</button>
+        </div>
+      </div>
+    </details>
+
+    <!-- 2. Results -->
+    <section id="results" hidden>
+      <div class="cite-note">If you use GaLa in your work, please cite
+        <a href="https://doi.org/10.1021/acs.nanolett.6c04076" target="_blank" rel="noopener">Luber et al., <em>Photoluminescence as a Quantitative Probe of Semiconductor Nanocrystals</em>, Nano Lett. 2026</a>.</div>
+      <div class="results-layout">
+        <nav class="spectrum-list card" aria-label="Loaded spectra">
+          <h2>Spectra <span id="spectrum-count" class="muted"></span></h2>
+          <ul id="spectrum-list"></ul>
+        </nav>
+        <div class="card spectrum-view">
+          <div class="view-head">
+            <h2 id="view-title"></h2>
+            <div class="unit-toggle" role="group" aria-label="x column unit for this spectrum">
+              <span class="muted small">x column:</span>
+              <button type="button" class="seg" data-unit="nm">nm</button>
+              <button type="button" class="seg" data-unit="eV">eV</button>
+            </div>
+          </div>
+          <div id="view-messages" class="messages"></div>
+          <p class="hint">Tip: check the logarithmic plot. Deviations in the tails can reveal hidden subpopulations.</p>
+          <div id="plot-main" class="plot-main"></div>
+          <div class="table-scroll">
+            <table class="result-table" id="result-table"></table>
+          </div>
+          <p class="muted small" id="fit-quality"></p>
+        </div>
+      </div>
+
+      <details class="card collapsible" id="summary-card" hidden open>
+        <summary>Summary of all fits</summary>
+        <div class="table-scroll"><table class="result-table summary" id="summary-table"></table></div>
+      </details>
+
+      <!-- Series analysis -->
+      <details class="card collapsible" id="series">
+        <summary>Series analysis (time or temperature)</summary>
+        <div class="series-body">
+          <p class="muted">Plot the fit parameters against a time or temperature value read from each file name
+            (for example <code>LR23_5s.txt</code> → 5 s, <code>sample_300K.txt</code> → 300 K). You can correct the values below.</p>
+          <div class="btn-row">
+            <label class="check"><input type="checkbox" id="series-enable"> Enable series analysis</label>
+            <label><input type="radio" name="series-kind" value="time" checked> Time</label>
+            <label><input type="radio" name="series-kind" value="temperature"> Temperature</label>
+          </div>
+          <div id="series-content" hidden>
+            <div id="series-messages" class="messages"></div>
+            <div class="table-scroll"><table class="result-table" id="series-table"></table></div>
+            <div id="series-params" class="series-grid"></div>
+            <div id="series-spectra" class="plot-wide"></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Export -->
+      <section class="card" id="export">
+        <h2>Export</h2>
+        <div class="export-grid">
+          <label class="check"><input type="checkbox" name="export" value="params" checked> Fit parameters with uncertainties (CSV)</label>
+          <label class="check"><input type="checkbox" name="export" value="curves"> Fitted curves and residuals (CSV)</label>
+          <label class="check"><input type="checkbox" name="export" value="preprocessed"> Preprocessed data (energy domain, normalized, CSV)</label>
+          <label class="check"><input type="checkbox" name="export" value="png"> Plots as PNG</label>
+          <label class="check"><input type="checkbox" name="export" value="svg"> Plots as SVG</label>
+          <label class="check"><input type="checkbox" name="export" value="pdf"> Plots as PDF</label>
+          <label class="check" id="export-series-label"><input type="checkbox" name="export" value="series"> Series plots (PNG and SVG)</label>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn primary" id="download-btn">Download</button>
+          <span class="muted small" id="export-status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+    </section>
+
+    <!-- About -->
+    <details class="card collapsible" id="about">
+      <summary>About the GaLa model</summary>
+      <div class="about-body">
+        <p>The spectrum is modeled as the convolution of a Gaussian of width σ centered at E<sub>G</sub>
+          with an asymmetric exponential tail function with widths w<sub>l</sub> (low energy) and w<sub>h</sub> (high energy):</p>
+        <div class="formula" data-tex="\mathrm{GaLa}(E) \propto \left(G_\sigma * T_{w_l,w_h}\right)(E - E_G)"></div>
+        <div class="formula" data-tex="G_\sigma(\varepsilon) = e^{-\varepsilon^2/(2\sigma^2)}, \qquad T_{w_l,w_h}(\varepsilon) = \begin{cases} e^{\varepsilon/w_l}, & \varepsilon \le 0 \\ e^{-\varepsilon/w_h}, & \varepsilon \ge 0 \end{cases}"></div>
+        <ul class="param-about">
+          <li><strong>E<sub>G</sub></strong> (eV): center of the Gaussian, the characteristic emission energy of the ensemble.</li>
+          <li><strong>σ</strong> (meV): standard deviation of the Gaussian, describing inhomogeneous broadening.</li>
+          <li><strong>w<sub>h</sub></strong> (meV): width of the exponential tail on the high-energy side.</li>
+          <li><strong>w<sub>l</sub></strong> (meV): width of the exponential tail on the low-energy side.</li>
+          <li><strong>y</strong> and <strong>A</strong>: baseline and amplitude of the normalized spectrum (practically fixed by default).</li>
+        </ul>
+        <p>Wavelength data are converted to energy with E = hc/λ (hc = 1239.841984 eV nm) and the Jacobian
+          I<sub>E</sub> = I<sub>λ</sub> λ²/hc, then normalized to the maximum. GaLx replaces the low-energy
+          Laplace tail with a Lorentzian of half width γ. The fit uses <code>scipy.optimize.curve_fit</code>;
+          uncertainties are 1σ from the covariance matrix.</p>
+      </div>
+    </details>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Model code: <a href="https://github.com/leoluber/gala" target="_blank" rel="noopener">github.com/leoluber/gala</a> (MIT license) ·
+        Preprint: <a href="https://doi.org/10.21203/rs.3.rs-8603272/v1" target="_blank" rel="noopener">doi:10.21203/rs.3.rs-8603272/v1</a> ·
+        Paper: <a href="https://doi.org/10.1021/acs.nanolett.6c04076" target="_blank" rel="noopener">Nano Lett. 2026</a></p>
+      <p class="muted small">Fits run locally with Pyodide (Python in WebAssembly), numpy and scipy. Plots by Plotly.</p>
+    </div>
+  </footer>
+</body>
+</html>
